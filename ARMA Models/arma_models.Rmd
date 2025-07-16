@@ -1,0 +1,235 @@
+---
+title: "Modelos Arma"
+author: "Renan Almeida"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## **Configurando  Ambiente e Importando os Dados**
+
+Algumas bibiliotecas sao necessarias para a execucao e visualizacao grafica 
+das analises realizadas nesse documento sobre dados da bolsa brasileira.
+
+- BatchGetSymbols
+- tidyverse
+- ggthemes
+- FinTS
+- WriteXLS
+- xtable
+- tbl2xts
+- forecast
+- tseries
+- timeSeries
+
+```{r}
+library(BatchGetSymbols)
+library(tidyverse)
+library(ggthemes) 
+library(FinTS)
+library(WriteXLS)
+library(xtable)
+library(tbl2xts)
+library(forecast)
+library(tseries)
+library(timeSeries)
+```
+
+Utilizando da biblioteca `BatchGetSymbols`, os dados sobre a bolsa ibovespa sao 
+importados a partir de 2019 ate o ano atual, em uma frequencia diaria.
+
+```{r}
+tickers<-c("^BVSP")
+
+ibov<- BatchGetSymbols(tickers,
+                                 first.date = '2021-01-01',
+                                 last.date = Sys.time(),
+                                 type.return = "log",
+                                 freq.data = "daily")
+
+ibov <- ibov[[2]]
+```
+
+Em seguida, separamos apenas os retornos diários da série do IBOVESPA para trabalhar sobre no desenvolvimento da atividade.
+
+```{r}
+daily_returns <- ibov %>% 
+  select(ref.date,ret.closing.prices)
+
+date <- daily_returns %>%
+  select(ref.date) %>% 
+  rename(date = ref.date) %>% 
+  slice(-1)
+
+daily_returns <- daily_returns %>%
+  select(ret.closing.prices) %>% 
+  slice(-1)
+
+## declarando como série temporal através do comando as.ts
+daily_returns=as.ts(daily_returns)
+
+```
+
+## **Exercicio 1**
+
+Usando todos os passos vistos no módulo sobre ARMA, encontre o melhor modelo para os retornos diários do índice Ibovespa. Utilize o período de 2021 - presente. Você pode usar a função auto.arima, mas deve fazer a identificação do modelo usando as FAC e FACP, diagnóstico, etc.
+
+### IDENTIFICAÇÃO DO MODELO
+
+FAC e FACP
+
+Para ter uma ideia do modelo a ser estimado, usamos as FAC e FACP.
+
+```{r}
+acf(daily_returns, lag.max=36) 
+pacf(daily_returns, lag.max=36) 
+```
+
+### Estimação do modelo ARMA
+
+Usando da analise sobre as FAC e FACP, decidimos qual o melhor modelo a ser empregado para a tarefa.
+
+```{r}
+x=arima(daily_returns,order=c(1,0,0)) 
+
+```
+
+### Diagnóstico do modelo
+Após estimar o modelo, verificamos se ele se faz adequado aos dados através da análise dos resíduos, que devem ter o comportamento de ruído branco.
+
+```{r}
+tsdiag(x)
+Box.test(x$residuals,lag=1) 
+Box.test(residuals(x),  type="Ljung")
+acf(residuals(x))
+pacf(residuals(x))
+
+```
+
+### **Gráfico dos resíduos**
+
+```{r}
+plot.ts(x$residuals)
+```
+
+## **Exercicio 2**
+
+Para o modelo escolhido no exercício anterior, calcule as previsões para 5 períodos à frente, com seu intervalo de confiança correspondente. Lembre-se que a previsão é do tipo estático: apenas informações até o momento t são usadas para fazer previsões em t+k.
+
+
+### Previsão 
+```{r}
+forecast<-predict(x,n.ahead=4) 
+#(4 passos a frente)
+#Com desvio-padrão
+predict(x, n.ahead = 15, se.fit=T)
+
+```
+
+## **Exercicio 3**
+
+Utilize a função BatchGetSymbols::GetSP500Stocks para baixar dados de todas as ações pertencentes ao atual índice SP500. Utilizando seus conhecimentos sobre dplyr, estime um modelo ARMA para os retornos de cada ação dos dados importados. No mesmo dataframe de saída, crie uma nova coluna com a previsão em t+1 de cada modelo. Qual ação possui maior expectativa de retorno?
+
+```{r}
+sp500_tickers_raw <- GetSP500Stocks()
+sp500_tickers <- sp500_tickers_raw$Tickers
+
+first_date_sp500 <- '2021-01-01'
+last_date_sp500 <- Sys.time()
+
+
+tickers_to_download <- sp500_tickers
+
+
+
+sp500_data <- BatchGetSymbols(tickers_to_download,
+                              first.date = first_date_sp500,
+                              last.date = last_date_sp500,
+                              type.return = "log",
+                              freq.data = "daily",
+                              cache.folder = file.path(tempdir(), 'BGS_Cache')) 
+```
+
+Após a obtenção dos dados, separamos apenas os retornos diários para realizar as previsões. Em seguida, iteramos por toda a lista de ativos presentes na SP500 e calculamos a previsão do valor da ação no tempo t+1. Essa previsão é armazenada em um dataframe separado.
+
+```{r}
+sp500_returns <- sp500_data[[2]] %>%
+  select(ref.date, ticker, ret.closing.prices) %>%
+  rename(date = ref.date, returns = ret.closing.prices) %>%
+  group_by(ticker) %>%
+  slice(-1) %>%
+  ungroup()
+
+results_df <- tibble(
+  ticker = character(),
+  arma_order = character(),
+  aic = numeric(),
+  bic = numeric(),
+  forecast_t_plus_1 = numeric()
+)
+
+
+
+# Loop para estimar o modelo ARMA para cada ação e prever t+1
+for (t in unique(sp500_returns$ticker)) {
+  cat(paste0("\nProcessando ticker: ", t, "\n"))
+  
+  current_returns <- sp500_returns %>%
+    dplyr::filter(ticker == t) %>%
+    select(returns) %>%
+    pull()
+  
+  model_fit <- auto.arima(current_returns, trace = FALSE, stepwise = TRUE, approximation = TRUE)
+  
+  if (is.null(model_fit)) {
+    results_df <- results_df %>%
+      add_row(
+        ticker = t,
+        arma_order = "Erro",
+        aic = NA_real_,
+        bic = NA_real_,
+        forecast_t_plus_1 = NA_real_
+      )
+    next
+  }
+  
+  forecast_result <- forecast(model_fit, h = 1)
+  
+  arma_order_str <- paste0("(", model_fit$arma[1], ",", model_fit$arma[5], ",", model_fit$arma[2], ")")
+  
+  results_df <- results_df %>%
+    add_row(
+      ticker = t,
+      arma_order = arma_order_str,
+      aic = model_fit$aic,
+      bic = model_fit$bic,
+      forecast_t_plus_1 = as.numeric(forecast_result$mean[1])
+    )
+}
+
+print(results_df)
+```
+
+Com os dados da previsao devidamente calculados, filtramos o dataframe afim de obter a acao com a maior expectativa de retornos no tempo t+1
+
+```{r}
+top_return_stock <- results_df %>%
+  arrange(desc(forecast_t_plus_1)) %>%
+  dplyr::filter(!is.na(forecast_t_plus_1)) %>%
+  head(1)
+  
+
+print(top_return_stock)
+```
+
+## **Exercicio 4**
+
+Separe os dados do SP500 em duas partes: etapa de estimação e etapa de previsão. Suponha que você queira, por exemplo, comprar a ação quando a previsão de retorno for positiva, vendendo-a no dia seguinte. As previsões dos modelos ARIMA permitem a construção de uma estratégia de negociação lucrativa?
+
+### Resolução
+
+Embora os modelos ARIMA sejam fundamentais na análise de séries temporais e úteis para compreender padrões de dados, construir uma estratégia de negociação de curto prazo consistentemente lucrativa baseada unicamente em previsões de retornos de ações feitas por modelos ARIMA é excepcionalmente difícil. Isso se deve à eficiência do mercado e à imprevisibilidade inerente dos movimentos diários dos preços.
+
+A maioria das estratégias lucrativas geralmente incorpora muitos outros fatores complexos, aprendizado de máquina (machine learning), dados de alta frequência e uma gestão de risco sofisticada.
