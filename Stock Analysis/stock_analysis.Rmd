@@ -1,0 +1,176 @@
+---
+title: "Ações Vale"
+author: "Renan Almeida"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## **Configurando  Ambiente e Importando os Dados**
+
+Algumas bibiliotecas sao necessarias para a execucao e visualizacao grafica 
+das analises realizadas nesse documento sobre dados da bolsa brasileira.
+
+- BatchGetSymbols
+- rugarch
+- tidyverse
+- ggthemes
+- FinTS
+- WriteXLS
+- xtable
+- tbl2xts
+
+```{r}
+
+library(BatchGetSymbols)
+library(rugarch)
+library(tidyverse)
+library(ggthemes) 
+library(FinTS)
+library(WriteXLS)
+library(xtable)
+library(tbl2xts)
+```
+
+Importamos as ações da Vale e armazenamos os log_retornos que serão utilizados no decorrer do desenvolvimento da atividade.
+
+```{r}
+tickers = c('VALE3.SA')
+
+assets <- BatchGetSymbols(tickers,
+                          first.date = '2019-01-01',
+                          last.date = Sys.time(),
+                          type.return = "log",
+                          freq.data = "daily")
+assets <- assets[[2]]
+
+log_retornos <- na.omit(assets$ret.adjusted.prices)
+```
+
+## **Modelo GARCH(1,1)**
+
+Ajustamos um modelo GARCH(1,1) utilizando ambas as distribuições normal e t-student, respectivamente.
+
+```{r}
+spec_arch_norm <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1, 1)),
+                             mean.model = list(armaOrder = c(0, 0), include.mean = TRUE),
+                             distribution.model = "norm")
+fit_arch_norm <- ugarchfit(spec = spec_arch_norm, data = log_retornos)
+print(fit_arch_norm)
+```
+
+```{r}
+spec_arch_t <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1, 1)),
+                          mean.model = list(armaOrder = c(0, 0), include.mean = TRUE),
+                          distribution.model = "std")
+
+fit_arch_t <- ugarchfit(spec = spec_arch_t, data = log_retornos)
+print(fit_arch_t)
+```
+
+
+## **Modelo EGARCH(1,1)**
+
+Ajustamos um modelo EGARCH(1,1) utilizando ambas as distribuições normal e t-student, respectivamente.
+
+```{r}
+spec_egarch_norm <- ugarchspec(variance.model = list(model = "eGARCH", garchOrder = c(1, 1)),
+                             mean.model = list(armaOrder = c(0, 0), include.mean = TRUE),
+                             distribution.model = "norm")
+fit_egarch_norm <- ugarchfit(spec = spec_egarch_norm, data = log_retornos)
+print(fit_egarch_norm)
+```
+
+```{r}
+spec_egarch_t <- ugarchspec(variance.model = list(model = "eGARCH", garchOrder = c(1, 1)),
+                          mean.model = list(armaOrder = c(0, 0), include.mean = TRUE),
+                          distribution.model = "std")
+
+fit_egarch_t <- ugarchfit(spec = spec_egarch_t, data = log_retornos)
+print(fit_egarch_t)
+```
+
+## **Modelo GJR(1,1)**
+
+Ajustamos um modelo GJR(1,1) utilizando ambas as distribuições normal e t-student, respectivamente.
+
+```{r}
+spec_gjr_norm <- ugarchspec(variance.model = list(model = "gjrGARCH", garchOrder = c(1, 1)),
+                             mean.model = list(armaOrder = c(0, 0), include.mean = TRUE),
+                             distribution.model = "norm")
+fit_gjr_norm <- ugarchfit(spec = spec_gjr_norm, data = log_retornos)
+print(fit_gjr_norm)
+```
+
+```{r}
+spec_gjr_t <- ugarchspec(variance.model = list(model = "gjrGARCH", garchOrder = c(1, 1)),
+                          mean.model = list(armaOrder = c(0, 0), include.mean = TRUE),
+                          distribution.model = "std")
+
+fit_gjr_t <- ugarchfit(spec = spec_gjr_t, data = log_retornos)
+print(fit_gjr_t)
+```
+
+## **Comparando os Modelos**
+
+Armazenamos os modelos em uma lista para facilitar o desenvolvimento, em seguida calculamos as metricas AIC e BIC para todos os modelos ajustados.
+
+```{r}
+all_fits <- list(
+  "GARCH(1,1) - Normal" = fit_arch_norm,
+  "GARCH(1,1) - Student-t" = fit_arch_t,
+  "EGARCH(1,1) - Normal" = fit_egarch_norm,
+  "EGARCH(1,1) - Student-t" = fit_egarch_t,
+  "GJR-GARCH(1,1) - Normal" = fit_gjr_norm,
+  "GJR-GARCH(1,1) - Student-t" = fit_gjr_t
+)
+
+model_comparison <- data.frame(
+  Model = names(all_fits),
+  AIC = sapply(all_fits, function(x) infocriteria(x)[1]),
+  BIC = sapply(all_fits, function(x) infocriteria(x)[2])
+)
+
+print(xtable(model_comparison, caption = "Comparacao entre os modelos: AIC e BIC"))
+```
+Entao, um melhor modelo e escolhido em cada metrica
+
+```{r}
+best_aic_model_name <- model_comparison$Model[which.min(model_comparison$AIC)]
+best_aic_model <- all_fits[[best_aic_model_name]]
+
+best_bic_model_name <- model_comparison$Model[which.min(model_comparison$BIC)]
+best_bic_model <- all_fits[[best_bic_model_name]]
+
+cat("Modelo com menor AIC:", best_aic_model_name, "\n")
+cat("Modelo com menor BIC:", best_bic_model_name, "\n")
+```
+Como ambos os melhores coincidem, seguimos para a anlise dos residuos do melhor modelo ajustado. Primeiramente analisamos as metricas ACF e PACF dos residuos.
+
+```{r}
+residuals_best_model <- residuals(best_bic_model, standardize = TRUE)
+
+acf(residuals_best_model, main = "ACF dos residuos")
+
+pacf(residuals_best_model, main = "PACF dos residuos")
+```
+Tambem e realizado uma analisa utilizando o teste Ljung-Box sobre os residuos.
+
+```{r}
+print(Box.test(residuals_best_model, lag = 20, type = "Ljung-Box"))
+
+print(Box.test(residuals_best_model^2, lag = 20, type = "Ljung-Box"))
+```
+## **Sobre a volatilidade condicional**
+
+Calculamos para os proximos 10 instantes de tempo, nesse caso 10 dias, a volatilidade condicional esperada do melhor modelo ajustado.
+
+```{r}
+vol_forecast <- ugarchforecast(best_bic_model, n.ahead = 10)
+
+forecasted_sigma <- sigma(vol_forecast)
+
+cat("Volatilidade condicional prevista para os proximos 10 instantes de tempo:\n")
+print(forecasted_sigma)
+```
