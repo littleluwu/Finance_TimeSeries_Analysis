@@ -1,0 +1,171 @@
+---
+title: "Modelos ARCH"
+author: "Renan Almeida"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## **Configurando  Ambiente e Importando os Dados**
+
+Algumas bibiliotecas sao necessarias para a execucao e visualizacao grafica 
+das analises realizadas nesse documento sobre dados da bolsa brasileira.
+
+- BatchGetSymbols
+- rugarch
+- tidyverse
+- ggthemes
+- FinTS
+- WriteXLS
+- xtable
+- tbl2xts
+
+```{r}
+
+library(BatchGetSymbols)
+library(rugarch)
+library(tidyverse)
+library(ggthemes) 
+library(FinTS)
+library(WriteXLS)
+library(xtable)
+library(tbl2xts)
+```
+## **Exercicio 3**
+
+Ajuste os modelos da família ARCH vistos em aula, considerando a ordem (1,1).
+Com as distribuições normal e t-Student para as seguintes séries, iniciando em 2019:
+
+### (a) log-retornos diários das ações da PETROBRAS;
+
+Primeiramente, obtemos as ações da bolsa brasileira para o ativo em análise.
+
+```{r}
+tickers = c('PETR4.SA')
+
+assets <- BatchGetSymbols(tickers,
+                          first.date = '2019-01-01',
+                          last.date = Sys.time(),
+                          type.return = "log",
+                          freq.data = "daily")
+assets <- assets[[2]]
+
+log_retornos <- na.omit(assets$ret.adjusted.prices)
+```
+#### Distribuição Normal
+
+```{r}
+spec_arch_norm <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1, 1)),
+                             mean.model = list(armaOrder = c(0, 0), include.mean = TRUE),
+                             distribution.model = "norm")
+fit_petra_arch_norm <- ugarchfit(spec = spec_arch_norm, data = log_retornos)
+print(fit_petra_arch_norm)
+```
+#### Distribuição T-Student
+
+```{r}
+spec_arch_t <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1, 1)),
+                          mean.model = list(armaOrder = c(0, 0), include.mean = TRUE),
+                          distribution.model = "std")
+
+fit_petra_arch_t <- ugarchfit(spec = spec_arch_t, data = log_retornos)
+print(fit_petra_arch_t)
+```
+
+### (b) log-retornos diarios do IBOVESPA.
+
+Primeiramente, obtemos as ações da IBOVESPA. para analise.
+
+```{r}
+
+tickers<-c("^BVSP")
+
+ibov<- BatchGetSymbols(tickers,
+                                 first.date = '2019-01-01',
+                                 last.date = Sys.time(),
+                                 type.return = "log",
+                                 freq.data = "daily")
+
+ibov <- na.omit(ibov[[2]])
+```
+#### Distribuição Normal
+
+```{r}
+spec_arch_norm <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1, 1)),
+                             mean.model = list(armaOrder = c(0, 0), include.mean = TRUE),
+                             distribution.model = "norm")
+fit_ibov_arch_norm <- ugarchfit(spec = spec_arch_norm, data = log_retornos)
+print(fit_ibov_arch_norm)
+```
+#### Distribuição T-Student
+
+```{r}
+spec_arch_t <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1, 1)),
+                          mean.model = list(armaOrder = c(0, 0), include.mean = TRUE),
+                          distribution.model = "std")
+
+fit_ibov_arch_t <- ugarchfit(spec = spec_arch_t, data = log_retornos)
+print(fit_ibov_arch_t)
+```
+
+## **Exercicio 4**
+
+Para os modelos ajustados acima, calcule os coeficientes de persistencia e half-life
+e interprete os resultados.
+
+### Análise dos modelos sobre as ações da PETROBRAS
+
+```{r}
+alpha1_petr4_norm <- fit_petra_arch_norm@fit$coef["alpha1"]
+beta1_petr4_norm <- fit_petra_arch_norm@fit$coef["beta1"]
+persistence_petr4_norm <- alpha1_petr4_norm + beta1_petr4_norm
+half_life_petr4_norm <- log(0.5) / log(persistence_petr4_norm)
+
+cat("PETR4.SA (Normal Distribution):\n")
+cat(sprintf("  Alpha1: %.4f\n", alpha1_petr4_norm))
+cat(sprintf("  Beta1: %.4f\n", beta1_petr4_norm))
+cat(sprintf("  Persistence (Alpha1 + Beta1): %.4f\n", persistence_petr4_norm))
+cat(sprintf("  Half-Life (days): %.2f\n", half_life_petr4_norm))
+```
+```{r}
+alpha1_petr4_t <- fit_petra_arch_t@fit$coef["alpha1"]
+beta1_petr4_t <- fit_petra_arch_t@fit$coef["beta1"]
+persistence_petr4_t <- alpha1_petr4_t + beta1_petr4_t
+half_life_petr4_t <- log(0.5) / log(persistence_petr4_t)
+
+cat("\nPETR4.SA (Student's t-Distribution):\n")
+cat(sprintf("  Alpha1: %.4f\n", alpha1_petr4_t))
+cat(sprintf("  Beta1: %.4f\n", beta1_petr4_t))
+cat(sprintf("  Persistence (Alpha1 + Beta1): %.4f\n", persistence_petr4_t))
+cat(sprintf("  Half-Life (days): %.2f\n", half_life_petr4_t))
+```
+### Análise dos modelos sobre as ações da IBOVESPA
+
+```{r}
+alpha1_ibov_norm <- fit_ibov_arch_norm@fit$coef["alpha1"]
+beta1_ibov_norm <- fit_ibov_arch_norm@fit$coef["beta1"]
+persistence_ibov_norm <- alpha1_ibov_norm + beta1_ibov_norm
+half_life_ibov_norm <- log(0.5) / log(persistence_ibov_norm)
+
+cat("Ibovespa (Normal Distribution):\n")
+cat(sprintf("  Alpha1: %.4f\n", alpha1_ibov_norm))
+cat(sprintf("  Beta1: %.4f\n", beta1_ibov_norm))
+cat(sprintf("  Persistence (Alpha1 + Beta1): %.4f\n", persistence_ibov_norm))
+cat(sprintf("  Half-Life (days): %.2f\n", half_life_ibov_norm))
+```
+
+```{r}
+alpha1_ibov_t <- fit_ibov_arch_t@fit$coef["alpha1"]
+beta1_ibov_t <- fit_ibov_arch_t@fit$coef["beta1"]
+persistence_ibov_t <- alpha1_ibov_t + beta1_ibov_t
+half_life_ibov_t <- log(0.5) / log(persistence_ibov_t)
+
+cat("Ibovespa (Student's t-Distribution):\n")
+cat(sprintf("  Alpha1: %.4f\n", alpha1_ibov_t))
+cat(sprintf("  Beta1: %.4f\n", beta1_ibov_t))
+cat(sprintf("  Persistence (Alpha1 + Beta1): %.4f\n", persistence_ibov_t))
+cat(sprintf("  Half-Life (days): %.2f\n", half_life_ibov_t))
+```
